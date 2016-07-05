@@ -1,4 +1,4 @@
-function [ FoS_incTorsion, FoSUlt_incTorsion, FoSSkin, FoSSkin_curv, FoSir, FoScr, FoScripPure, FoScripAdjusted, FoSStringer ] = analysisTotal( LOAD_FACTOR, SAVE_DATA )
+function [ FoS_incTorsion, FoSUlt_incTorsion, FoSSkin, FoSSkin_curv, FoSir, FoScr, FoScripPure, FoScripAdjusted, FoSStringer ] = analysisTotalLegacy( LOAD_FACTOR, SAVE_DATA )
 
 % function to solve an idealised 3 cell wing in combination of shear and moment
 % Author: Declan Walsh
@@ -8,7 +8,7 @@ function [ FoS_incTorsion, FoSUlt_incTorsion, FoSSkin, FoSSkin_curv, FoSir, FoSc
 ROUGH_RELATIVE_ERROR = 0.05; % used as percentage margin to check results
 PRECISE_RELATIVE_ERROR = 1e-10;
 
-%% UNIT CONSTANTS
+%% BASIC GEOMETRY AND CONSTANTS
 
 PA_TO_PSI = 0.000145038; % conversion unit for Pascals to psi
 NMM_TO_PI = 5.71015; % conversion unit for N/mm to lb/in
@@ -17,13 +17,9 @@ MPH_TO_FPS = 17.6; % conversion unit for mph to feet per second
 
 KILO = 1000;
 
-%% MATERIAL CONSTANTS
-
 G = 28e9 * PA_TO_PSI; % shear modulus of Al-2024 sheet metal clad (Pa)
 F_YIELD = 310e6 * PA_TO_PSI; % yield stress of Al-2024 sheet metal clad (ksi)
 F_ULT = 430e6 * PA_TO_PSI;
-
-%% AIRCRAFT CONSTANTS
 
 CHORD = 6*FT_TO_IN; % length of chord of Beechcraft King Air B200 (in)
 
@@ -34,7 +30,7 @@ STRINGER_WIDTH = 0.5; % (in)
 STRINGER_DEPTH = 1; % (in) - controls stiffener column buckling
 t_stringer = 0.2;
 
-% all relevant data pulled from Beechcraft King Air B200
+% aircraft data
 % http://www.mrmoo.net/pilot/BE200/Older%20CRH%20split%20up/03%20Limitations.pdf
 BANK_ANGLE_MAX = acosd(1/LOAD_FACTOR); % bank angle of aircraft that gives the load factor
 MTOW = 12500; % maximum take off weight (lb)
@@ -42,6 +38,24 @@ WEIGHT_WING = 2000; % weight per wing (lb)
 SPAN = 60*FT_TO_IN; % span (in)
 EQ_MTOW = LOAD_FACTOR * MTOW;
 EQ_WEIGHT_WING = LOAD_FACTOR*WEIGHT_WING;
+
+% drag calc data
+DENSITY = 0.0765/(FT_TO_IN^3); % density of air at 59F in lbm/inch^3
+g = 32.174*FT_TO_IN; % acceleration due to gravity in in per second^2
+V_MAX = 339*MPH_TO_FPS;
+AREA_WING = 303*FT_TO_IN*FT_TO_IN;
+q_MAX = 0.5*DENSITY/g*V_MAX^2;
+CD0 = 0.02;
+K = 1/(pi*9.8*0.85);
+CD = CD0 + K*((EQ_MTOW/(AREA_WING*q_MAX))^2);
+D = q_MAX*AREA_WING*CD;
+
+SF_D = D;
+BM_D = 0.5 * D * (SPAN/4);
+
+% load data
+SF = 0.5 * EQ_MTOW - EQ_WEIGHT_WING;
+BM = 0.4*(SPAN/2)*SF;
 
 % shear forces act at the quarter chord and through the centreline
 SF_xLocation = CHORD/4;
@@ -58,30 +72,9 @@ LENGTH_1 = 0.15*CHORD;
 LENGTH_2 = 0.325*CHORD;
 LENGTH_3 = 0.325*CHORD;
 
-% calculate the front ellipse length through two different methods to check
 frontEllipseApprox = pi*sqrt((LENGTH_1^2 + (STIFFNER_1/2)^2)/2); % approximation to ellipse length
 frontEllipseLength = (pi/2)*(3*(LENGTH_1 + STIFFNER_1/2) - sqrt((3*LENGTH_1+STIFFNER_1/2)*(LENGTH_1 + 3* STIFFNER_1/2))); % more accurate ellipse length
 assert(abs(frontEllipseApprox/frontEllipseLength - 1) < ROUGH_RELATIVE_ERROR, 'Ellipse length equations may be inaccurate - two methods have diverging results');
-
-%% LOAD DATA
-
-% lift shear loads
-SF = 0.5 * EQ_MTOW - EQ_WEIGHT_WING;
-BM = 0.4*(SPAN/2)*SF;
-
-% drag shear loads
-DENSITY = 0.0765/(FT_TO_IN^3); % density of air at 59F in lbm/inch^3
-g = 32.174*FT_TO_IN; % acceleration due to gravity in inch per second^2
-V_MAX = 339*MPH_TO_FPS;
-AREA_WING = 303*FT_TO_IN*FT_TO_IN;
-q_MAX = 0.5*DENSITY/g*V_MAX^2;
-CD0 = 0.02;
-K = 1/(pi*9.8*0.85);
-CD = CD0 + K*((EQ_MTOW/(AREA_WING*q_MAX))^2);
-D = q_MAX*AREA_WING*CD;
-
-SF_D = D;
-BM_D = 0.5 * D * (SPAN/4);
 
 %% IDEALISATION OF STRUCTURE
 
@@ -99,12 +92,14 @@ xB = xB([1, diff(xB)]~=0);
 
 xB = [xB, fliplr(xB)]; % top half is equivlant to bottom half
 
-% panel 1 defined (elliptical - leading edge - only two booms defined)
+% panel 1 defined (elliptical - leading edge)
 panel1Length = [frontEllipseLength, STIFFNER_1]; % panels of box 1 (18-1 outer, 1-18 inner) lengths
 panel1Boom = [18, 1]; % booms associated with each panel (in same order)
 panel1Thickness = [t_skin, t_stiffner]; % panel 1 thickness (outer, inner)
 panel1Y = yB(panel1Boom);
 
+%panel1MomentArm = mean([panel1Y(1:end-1);panel1Y(2:end)]);
+%panel1MomentArm(end + 1) = (panel1Y(end) + panel1Y(1))/2;
 panel1MomentArm(1) = -SF_xLocation;
 panel1MomentArm(2) = -SF_xLocation + LENGTH_1;
 
@@ -135,7 +130,6 @@ panel1Delta = panel1Length./panel1Thickness;
 panel2Delta = panel2Length./panel2Thickness;
 panel3Delta = panel3Length./panel3Thickness;
 
-% area of each cell
 A1 = pi*LENGTH_1*STIFFNER_1/2; % area of box  1 (ellipse)
 A2 = ((STIFFNER_1+STIFFNER_2)/2)*LENGTH_2; % area of box 2 (trapezoid)
 A3 = ((STIFFNER_2+STIFFNER_3)/2)*LENGTH_3; % area of box 3 (trapezoid);
@@ -169,15 +163,36 @@ A_effective(8) = A_stringer + panel3Length(8)*panel3Thickness(8)*(2+yB(7)/yB(8))
 A_effective(9) = A_spar_cap + panel3Length(9)*panel3Thickness(9)*(2+yB(8)/yB(9))/6 ...
     + panel3Length(10)*panel3Thickness(10)*(2+yB(10)/yB(9))/6;
 
+%% ALTERNATE BOOM CALC
+
+% assuming a pure bending moment to calculate relative stresses
+% assuming symmetry and only solving for the bottom half
+% A_effectiveD(1) = A_spar_cap + panel1Length(1)*panel1Thickness(1)*(2+xB(18)/xB(1))/6 ...
+%     + panel1Length(2)*panel1Thickness(2)*(2+xB(18)/xB(1))/6 ...
+%     + panel2Length(9)*panel2Thickness(9)*(2+xB(2)/xB(1))/6;
+% 
+% A_effectiveD(2) = A_stringer + panel2Length(9)*panel2Thickness(9)*(2+xB(1)/xB(2))/6 + panel2Length(8)*panel2Thickness(8)*(2+xB(3)/xB(2))/6;
+% A_effectiveD(3) = A_stringer + panel2Length(8)*panel2Thickness(8)*(2+xB(2)/xB(3))/6 + panel2Length(7)*panel2Thickness(7)*(2+xB(4)/xB(3))/6;
+% A_effectiveD(4) = A_stringer + panel2Length(7)*panel2Thickness(7)*(2+xB(3)/xB(4))/6 + panel2Length(6)*panel2Thickness(6)*(2+xB(5)/xB(4))/6;
+% 
+% A_effectiveD(5) = A_spar_cap + panel2Length(6)*panel2Thickness(6)*(2+xB(4)/xB(5))/6 ...
+%     + panel2Length(5)*panel2Thickness(5)*(2+xB(14)/xB(5))/6 ...
+%     + panel3Length(6)*panel3Thickness(6)*(2+xB(6)/xB(5))/6;
+% 
+% A_effectiveD(6) = A_stringer + panel3Length(6)*panel3Thickness(6)*(2+xB(5)/xB(6))/6 + panel3Length(7)*panel3Thickness(7)*(2+xB(7)/xB(6))/6;
+% A_effectiveD(7) = A_stringer + panel3Length(7)*panel3Thickness(7)*(2+xB(6)/xB(7))/6 + panel3Length(8)*panel3Thickness(8)*(2+xB(8)/xB(7))/6;
+% A_effectiveD(8) = A_stringer + panel3Length(8)*panel3Thickness(8)*(2+xB(7)/xB(8))/6 + panel3Length(9)*panel3Thickness(9)*(2+xB(9)/xB(8))/6;
+% 
+% A_effectiveD(9) = A_spar_cap + panel3Length(9)*panel3Thickness(9)*(2+xB(8)/xB(9))/6 ...
+%     + panel3Length(10)*panel3Thickness(10)*(2+xB(10)/xB(9))/6;
+
 %% X CENTROID
 
-B = [A_effective, fliplr(A_effective)]; % top half is equivlant to bottom half due to symmetry
+B = [A_effective, fliplr(A_effective)]; % top half is equivlant to bottom half
+% BD = [A_effectiveD, fliplr(A_effectiveD)];
 
 xBCentroid = sum(xB.*B)/sum(B);
 xBShifted = xB - xBCentroid; % shifts the x locations of the booms relative to the centroid 
-
-% y centroid is on the line of symmetry
-
 %% BASIC SHEAR FLOW
 
 Sy = SF; % vertical load applied
@@ -188,9 +203,11 @@ qB1 = basicSFBoxCalc( B, yB, panel1Boom, Sy, Ixx, xBShifted, Sx, Iyy, Ixy);
 qB2 = basicSFBoxCalc( B, yB, panel2Boom, Sy, Ixx, xBShifted, Sx, Iyy, Ixy);
 qB3 = basicSFBoxCalc( B, yB, panel3Boom, Sy, Ixx, xBShifted, Sx, Iyy, Ixy);
 
+%% RATE OF TWIST EQNS
+
 % find common booms and panel indexes relating to the booms
-[~, panel1CommonIdx, panel2_1CommonIdx] = commonBooms(panel1Boom, panel2Boom);
-[~, panel3CommonIdx, panel2_3CommonIdx] = commonBooms(panel3Boom, panel2Boom);
+[commonB1_2, panel1CommonIdx, panel2_1CommonIdx] = commonBooms(panel1Boom, panel2Boom);
+[commonB3_2, panel3CommonIdx, panel2_3CommonIdx] = commonBooms(panel3Boom, panel2Boom);
 
 % correction for multiple entries into shared panels
 qB1(panel1CommonIdx) = qB1(panel1CommonIdx) + qB2(panel2_1CommonIdx-1);
@@ -198,10 +215,60 @@ qB2(panel2_1CommonIdx) = qB2(panel2_1CommonIdx) + qB1(panel1CommonIdx-1);
 qB2(panel2_3CommonIdx) = qB2(panel2_3CommonIdx) + qB3(panel3CommonIdx-1);
 qB3(panel3CommonIdx) = qB3(panel3CommonIdx) + qB2(panel2_3CommonIdx-1);
 
+% rate of twist equation (Q11*qs01 + Q12*qs02 = Q13)
+% cells 1 and 2
+Q11 = 1/(2*A1*G)*sum(panel1Delta) + 1/(2*A2*G)*panel2Delta(panel2_1CommonIdx);
+Q12 = -1/(2*A1*G)*panel1Delta(panel1CommonIdx) - 1/(2*A2*G)*sum(panel2Delta);
+Q13 = 1/(2*A2*G)*panel2Delta(panel2_3CommonIdx);
+S1 = - (1/(2*A1*G))*sum(qB1.*panel1Delta) + (1/(2*A2*G))*sum(qB2.*panel2Delta);
+
+Q12 = Q12/Q11;
+Q13 = Q13/Q11;
+S1 = S1/Q11;
+Q11 = Q11/Q11;
+
+% cells 2 and 3
+Q21 = -1/(2*A2*G)*panel2Delta(panel2_1CommonIdx);
+Q22 = 1/(2*A2*G)*sum(panel2Delta) + 1/(2*A3*G)*panel2Delta(panel2_3CommonIdx);
+Q23 = -1/(2*A2*G)*panel3Delta(panel3CommonIdx) - 1/(2*A3*G)*sum(panel3Delta);
+S2 = - (1/(2*A2*G))*sum(qB2.*panel2Delta) + (1/(2*A3*G))*sum(qB3.*panel3Delta); 
+
+% cells 1 and 3
+% Q21 = 1/(2*A1*G)*sum(panel1Delta);
+% Q22 = -1/(2*A1*G)*panel1Delta(panel1CommonIdx) + 1/(2*A3*G)*panel3Delta(panel3CommonIdx);
+% Q23 = -1/(2*A3*G)*sum(panel3Delta);
+% S2 = 1/(2*A3*G)*sum(panel3Delta.*qB3) - 1/(2*A1*G)*sum(panel1Delta.*qB1);
+
+Q22 = Q22/Q21;
+Q23 = Q23/Q21;
+S2 = S2/Q21;
+Q21 = Q21/Q21;
+%% MOMENT EQUILIBRIUM
+% moments are taken about the quarter chord centreline where both shear forces act through
+
+% moment equilibrium (Q21*qs01 + Q22*qs02 = Q23)
+Q31 = 2*A1;
+Q32 = 2*A2;
+Q33 = 2*A3;
+
+% need to correct for basic shear flow signs inconsistency due to sign
+% convention rotating with the cell (opposite on top to bottom - same moment)
+S3 = -sum(qB1.*panel1Length.*panel1MomentArm) -sum(abs((qB2(1:end-1)).*panel2Length(1:end-1).*panel2MomentArm(1:end-1))) - sum(-abs(qB3(1:end-1).*panel3Length(1:end-1).*panel3MomentArm(1:end-1))) - qB3(end)*panel3Length(end)*panel3MomentArm(end);
+% S3 = S3 - qB2(end)*panel2Length(end)*panel2MomentArm(end); % doubling up on stiffner 1-18
+
+Q32 = Q32/Q31;
+Q33 = Q33/Q31;
+S3 = S3/Q31;
+Q31 = Q31/Q31;
+
 
 %% CONSTANT SHEAR FLOW
+% solving the system of linear equations to provide the constant shear flow
 
-qs0 = constantSFCalcShear( panel1Boom, panel2Boom, panel3Boom, qB1, qB2, qB3, A1, A2, A3, G, panel1Length, panel1MomentArm, panel1Delta, panel2Length, panel2MomentArm, panel2Delta, panel3Length, panel3MomentArm, panel3Delta);
+Q = [Q11, Q12, Q13; Q21, Q22, Q23; Q31, Q32, Q33];
+S = [S1; S2; S3];
+
+qs0 = Q\S;
 
 %% TOTAL SHEAR FLOW
 % total shear flow is sum of basic and constant shear flow
@@ -245,13 +312,46 @@ shearTotal2 = qTotal2./panel2Thickness;
 shearTotal3 = qTotal3./panel3Thickness;
 
 %% TORSION SHEAR IN PANEL
-% torsion shear is constant over each cell by the thin walled assumption
 
-CM = -0.6; % low angle of attack < 20 give a moment coefficient
+T11 = 1/(2*A1*G)*sum(panel1Delta) + 1/(2*A2*G)*panel2Delta(panel2_1CommonIdx);
+T12 = -1/(2*A1*G)*panel1Delta(panel1CommonIdx) - 1/(2*A2*G)*sum(panel2Delta);
+T13 = 1/(2*A2*G)*panel2Delta(panel2_3CommonIdx);
+TS1 = 0;
+
+T12 = T12/T11;
+T13 = T13/T11;
+TS1 = TS1/T11;
+T11 = T11/T11;
+
+% cells 2 and 3
+T21 = -1/(2*A2*G)*panel2Delta(panel2_1CommonIdx);
+T22 = 1/(2*A2*G)*sum(panel2Delta) + 1/(2*A3*G)*panel2Delta(panel2_3CommonIdx);
+T23 = -1/(2*A2*G)*panel3Delta(panel3CommonIdx) - 1/(2*A3*G)*sum(panel3Delta);
+TS2 = 0; 
+
+% cells 1 and 3
+% Q21 = 1/(2*A1*G)*sum(panel1Delta);
+% Q22 = -1/(2*A1*G)*panel1Delta(panel1CommonIdx) + 1/(2*A3*G)*panel3Delta(panel3CommonIdx);
+% Q23 = -1/(2*A3*G)*sum(panel3Delta);
+% TS2 = 0;
+
+T22 = T22/T21;
+T23 = T23/T21;
+TS2 = TS2/T21;
+T21 = T21/T21;
+
+CM = -0.6; % low angle of attack < 20
 T = q_MAX*AREA_WING*CM; % torque applied to wing in lb.in using the pitching moment coefficient of 0.5
+T31 = 2*A1;
+T32 = 2*A2;
+T33 = 2*A3;
+TS3 = T;
 
-% basic shear flow is zero for torsion case
-qs0Torsion = constantSFCalcTorsion( panel1Boom, panel2Boom, panel3Boom, panel1Delta, panel2Delta, panel3Delta, 0, 0, 0, A1, A2, A3, G, T);
+QT = [T11, T12, T13; T21, T22, T23; T13, T32, T33];
+
+ST = [TS1; TS2; TS3];
+
+qs0Torsion = QT\ST;
 
 shearTorsion1 = qs0Torsion(1)./panel1Thickness;
 shearTorsion2 = qs0Torsion(2)./panel2Thickness;
@@ -289,7 +389,6 @@ normalTotalD = -BM_D*xBShifted/Iyy;
 
 normalTotal = normalTotalB + normalTotalD;
 
-% assumes maximum compressive load is the critical case (neglecting tension)
 [maxComp, BoomMaxComp] = min(normalTotal);
 idxMaxComp = find(panel3Boom == BoomMaxComp);
 
@@ -329,11 +428,8 @@ end
 
 tau = max(abs(shearCombined2));
 
-% using the Von Mises failure criterion (assuming homogenous, isotropic material)
 F_VM = sqrt(max(abs(normalTotal))^2 + 3*(max(abs(shearTotal2)))^2);
 F_VM_incTorsion = sqrt(max(abs(normalTotal))^2 + 3*(max(abs(shearCombined2)))^2);
-
-% calculating the factor of safety
 FoS = F_YIELD/F_VM
 FoS_incTorsion = F_YIELD/F_VM_incTorsion
 FoSUlt_incTorsion = F_ULT/F_VM_incTorsion
@@ -459,4 +555,3 @@ end
 FoScripAdjusted = Fcc_stringer/-maxComp
 
 end
-
